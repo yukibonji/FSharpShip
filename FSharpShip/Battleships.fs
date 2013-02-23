@@ -34,15 +34,15 @@ type Game (shipList: (int * int) list list) =
     let fleet = Agent.Start(fun inbox ->
         let rec loop (shipList: (int * int) list list) = 
             async {
-                let! (replyChannel: AsyncReplyChannel<ShootResult * (int*int) list list>, target) = inbox.Receive()
+                let! (replyChannel: AsyncReplyChannel<ShootResult>, target) = inbox.Receive()
 
                 match anyHit (target, shipList) with
                 | true -> 
                     let (output, newList) = onCollision target shipList
-                    replyChannel.Reply (output, newList)
+                    replyChannel.Reply output
                     return! loop newList
                 | false -> 
-                    replyChannel.Reply (Miss, shipList)
+                    replyChannel.Reply Miss
                     return! loop shipList
             }
         loop shipList )
