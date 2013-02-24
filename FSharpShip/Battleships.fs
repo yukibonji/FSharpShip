@@ -11,10 +11,6 @@ type ShootResult =
     | Won
 
 type Game (shipList: (int * int) list list) = 
-    let anyHit target shipList =
-        let isShipHit = List.exists (fun x -> x = target)
-        shipList |> List.exists isShipHit
-
     let delete item = 
         Seq.where (fun x -> x <> item) >> Seq.toList
 
@@ -29,12 +25,16 @@ type Game (shipList: (int * int) list list) =
         | n when n = shipList.Length -> (Hit, newList)
         | _ -> (Sunk, newList)
 
-    let fleet = Agent.Start(fun inbox ->
+    static member private anyHit target shipList =
+        let isShipHit = List.exists (fun x -> x = target)
+        shipList |> List.exists isShipHit
+
+    member private this.fleet = Agent.Start(fun inbox ->
         let rec loop (shipList: (int * int) list list) = 
             async {
                 let! (replyChannel: AsyncReplyChannel<ShootResult>, target) = inbox.Receive()
 
-                match anyHit target shipList with
+                match Game.anyHit target shipList with
                 | true -> 
                     let (output, newList) = onCollision target shipList
                     replyChannel.Reply output
@@ -45,7 +45,7 @@ type Game (shipList: (int * int) list list) =
             }
         loop shipList )
 
-    member private this.generateShip (size, length) =
+    static member private generateShip (size, length) =
         let rnd = System.Random()
         let horizontal = rnd.Next 2 = 1
         let constant = rnd.Next size
@@ -58,21 +58,21 @@ type Game (shipList: (int * int) list list) =
         else
             dots |> List.map mapXFun
 
-    member private this.generateShip (size, length, shipList) =
-        let ship = this.generateShip (size, length)
-        match ship |> List.exists (fun x -> anyHit x shipList) with
-        | true -> this.generateShip (size, length, shipList)
+    static member private generateLegalShip (size, length, shipList) =
+        let ship = Game.generateShip (size, length)
+        match ship |> List.exists (fun x -> Game.anyHit x shipList) with
+        | true -> Game.generateLegalShip (size, length, shipList)
         | false -> ship
 
-    member private this.generateShips size lengthList = 
-        let mapFun = fun ships x -> (this.generateShip (size, x, ships)) :: ships
+    static member private generateShips size lengthList = 
+        let mapFun = fun ships x -> (Game.generateLegalShip (size, x, ships)) :: ships
         lengthList |> List.fold mapFun [] 
 
     new () = Game([[(1,2);(2,2)];[(4,5);(4,6)]])
 
-    new (size: int, lengthList: int list) as this = 
-        let ships = this.generateShips size lengthList
+    new (size: int, lengthList: int list) as this =
+        let ships = Game.generateShips size lengthList
         Game ships
 
     member this.Shoot target =
-        fleet.PostAndReply (fun replyChannel -> replyChannel, target)
+        this.fleet.PostAndReply (fun replyChannel -> replyChannel, target)
