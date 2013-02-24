@@ -11,18 +11,16 @@ type ShootResult =
     | Won
 
 type Game (shipList: (int * int) list list) = 
-    let rec anyHit = function
-        | (_,[]) -> false
-        | (target, H :: T) ->
-            match H |> List.exists (fun x -> x = target) with
-            | true -> true
-            | false -> anyHit (target, T)
+    let anyHit target shipList =
+        let isShipHit = List.exists (fun x -> x = target)
+        shipList |> List.exists isShipHit
 
-    let delete item = Seq.where (fun x -> x <> item) >> Seq.toList
+    let delete item = 
+        Seq.where (fun x -> x <> item) >> Seq.toList
 
-    let deleteHit (target: int * int) (shipList: (int * int) list list) =
-        shipList |> List.map (fun ship -> ship |> delete target)
-                 |> List.filter (fun ship -> ship <> [])
+    let deleteHit target =
+        let isNotSunk = (<>) []
+        List.map (delete target) >> List.filter isNotSunk
 
     let onCollision (target: int * int) (shipList: (int * int) list list) =
         let newList = shipList |> deleteHit target
@@ -36,7 +34,7 @@ type Game (shipList: (int * int) list list) =
             async {
                 let! (replyChannel: AsyncReplyChannel<ShootResult>, target) = inbox.Receive()
 
-                match anyHit (target, shipList) with
+                match anyHit target shipList with
                 | true -> 
                     let (output, newList) = onCollision target shipList
                     replyChannel.Reply output
@@ -62,7 +60,7 @@ type Game (shipList: (int * int) list list) =
 
     member private this.generateShip (size, length, shipList) =
         let ship = this.generateShip (size, length)
-        match ship |> List.exists (fun x -> anyHit (x, shipList)) with
+        match ship |> List.exists (fun x -> anyHit x shipList) with
         | true -> this.generateShip (size, length, shipList)
         | false -> ship
 
