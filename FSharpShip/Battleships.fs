@@ -4,46 +4,52 @@ open Microsoft.FSharp.Control
 
 type Agent<'Msg> = MailboxProcessor<'Msg>
 
+type Point = 
+    | Point of (int * int)
+
+type Ship =
+    | Ship of Point list
+
 type ShootResult = 
     | Miss
     | Hit
     | Sunk
     | Won
 
-type Game (shipList: (int * int) list list) = 
-    let delete item = 
-        Seq.where (fun x -> x <> item) >> Seq.toList
+type Game (shipList: Ship list) = 
+    let delete target (Ship points) = 
+        points |> List.filter (fun x -> x <> Point(target)) 
+               |> Ship
 
     let deleteHit target =
-        let isNotSunk = (<>) []
+        let isNotSunk (Ship points) = points <> []
         List.map (delete target) >> List.filter isNotSunk
 
-    let onCollision (target: int * int) (shipList: (int * int) list list) =
-        let newList = shipList |> deleteHit target
-        match newList.Length with
+    let onCollision target ships =
+        let newShips = ships |> deleteHit target
+        match newShips.Length with
         | 0 -> (Won, [])
-        | n when n = shipList.Length -> (Hit, newList)
-        | _ -> (Sunk, newList)
+        | n when n = ships.Length -> (Hit, newShips)
+        | _ -> (Sunk, newShips)
 
-    static member private anyHit target shipList =
-        let isShipHit = List.exists (fun x -> x = target)
-        shipList |> List.exists isShipHit
-
-    member private this.fleet = Agent.Start(fun inbox ->
-        let rec loop (shipList: (int * int) list list) = 
+    let fleet = Agent.Start(fun inbox ->
+        let rec loop (ships: Ship list) = 
             async {
                 let! (replyChannel: AsyncReplyChannel<ShootResult>, target) = inbox.Receive()
 
-                match Game.anyHit target shipList with
-                | true -> 
-                    let (output, newList) = onCollision target shipList
+                if Point(target) |> Game.anyHit ships then
+                    let (output, newShips) = onCollision target ships
                     replyChannel.Reply output
-                    return! loop newList
-                | false -> 
+                    return! loop newShips
+                else 
                     replyChannel.Reply Miss
-                    return! loop shipList
+                    return! loop ships
             }
         loop shipList )
+
+    static member private anyHit ships point =
+        let isShipHit (Ship points) = points |> Seq.exists (fun x -> x = point)
+        ships |> List.exists isShipHit
 
     static member private generateShip (size, length) =
         let rnd = System.Random()
@@ -51,28 +57,29 @@ type Game (shipList: (int * int) list list) =
         let constant = rnd.Next size
         let vary = rnd.Next (size - length)
         let dots = [vary..vary + length - 1]
-        let mapYFun = fun y -> (constant, y)
-        let mapXFun = fun x -> (x, constant)
+        let mapYFun = fun y -> Point(constant, y)
+        let mapXFun = fun x -> Point(x, constant)
         if horizontal then
-            dots |> List.map mapYFun
+            dots |> List.map mapYFun |> Ship
         else
-            dots |> List.map mapXFun
+            dots |> List.map mapXFun |> Ship
 
-    static member private generateLegalShip (size, length, shipList) =
-        let ship = Game.generateShip (size, length)
-        match ship |> List.exists (fun x -> Game.anyHit x shipList) with
-        | true -> Game.generateLegalShip (size, length, shipList)
-        | false -> ship
+    static member private generateLegalShip (size, length, existingShips) =
+        let (Ship points) = Game.generateShip (size, length)
+        if points |> List.exists (Game.anyHit existingShips) then
+            Game.generateLegalShip (size, length, existingShips)
+        else 
+            Ship(points)
 
     static member private generateShips size lengthList = 
-        let mapFun = fun ships x -> (Game.generateLegalShip (size, x, ships)) :: ships
+        let mapFun = fun (ships: Ship list) x -> (Game.generateLegalShip (size, x, ships)) :: ships
         lengthList |> List.fold mapFun [] 
 
-    new () = Game([[(1,2);(2,2)];[(4,5);(4,6)]])
+    new () = Game ( [Ship([Point(1,2); Point(2,2)]); Ship([Point(4,5); Point(4,6)])] )
 
-    new (size: int, lengthList: int list) as this =
+    new (size: int, lengthList: int list) =
         let ships = Game.generateShips size lengthList
         Game ships
 
     member this.Shoot target =
-        this.fleet.PostAndReply (fun replyChannel -> replyChannel, target)
+        fleet.PostAndReply (fun replyChannel -> replyChannel, target)
